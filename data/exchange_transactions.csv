@@ -1,0 +1,23 @@
+transaction_id,timestamp,type,asset,quantity,currency,price_per_unit,total_value,fee,wallet,notes
+TXN-U-001,2024-01-15T10:30:00Z,buy,BTC,0.5,USD,42000,21000,15,exchange_hot,Matches TXN-U-001 exactly
+TXN-U-002,2024-01-15T11:00:05Z,sell,ETH,2.0,USD,2500,5000,10,exchange_hot,Matches TXN-U-002 (ts within tolerance)
+TXN-U-003,2024-01-16T09:15:00Z,transfer_in,BTC,0.1,USD,,,,exchange_hot,Perspective match for TXN-U-003
+TXN-U-004,2024-01-16T14:35:00Z,buy,SOL,10.05,USD,100,1005,5,exchange_hot,Near-match TXN-U-004 (slightly different qty)
+TXN-U-005,2024-01-17T08:00:00Z,sell,BTC,0.255,USD,43000,10965,20,exchange_hot,Conflicting qty vs TXN-U-005
+EX-ONLY-001,2024-01-17T12:00:00Z,buy,ETH,1.5,USD,2600,3900,8,exchange_hot,No user match - unmatched_exchange
+TXN-U-007,2024-01-18T10:02:00Z,transfer_in,ETH,0.5,USD,,,,exchange_hot,Perspective match TXN-U-007 (2min diff)
+EX-ONLY-002,2024-01-18T16:00:00Z,buy,DOGE,5000,USD,0.08,400,2,exchange_hot,No user match - unmatched_exchange
+TXN-U-009,2024-01-19T09:30:00Z,sell,SOL,5,USD,110,550,3,exchange_hot,Matches TXN-U-009 exactly
+TXN-U-010,2024-01-19T15:00:00Z,buy,BTC,0.1,USD,44000,4400,10,exchange_hot,Matches TXN-U-010 exactly
+TXN-U-011,2024-01-20T08:00:00Z,buy,BTC,0.05,USD,44500,2225,5,exchange_hot,Matches TXN-U-011 (bitcoin alias)
+TXN-U-012,2024-01-20T10:00:00Z,transfer_in,ETH,1.0,USD,2700,2700,7,exchange_hot,Matches TXN-U-012 (ethereum alias)
+TXN-U-013,2024-01-20T12:00:00Z,transfer_out,SOL,2.0,USD,115,230,4,exchange_hot,Matches TXN-U-013 (solana alias)
+TXN-U-014,2024-01-21T09:00:00Z,buy,ADA,1000,USD,0.5,500,3,exchange_hot,Matches TXN-U-014 exactly
+TXN-U-015,2024-01-21T14:00:00Z,sell,DOGE,2000,USD,0.09,180,2,exchange_hot,Matches TXN-U-015 exactly
+TXN-U-016,2024-01-22T10:00:00Z,buy,LINK,50,USD,15,750,4,exchange_hot,Matches TXN-U-016 exactly
+TXN-U-017,2024-01-22T14:30:00Z,sell,ADA,500,USD,0.52,260,2,exchange_hot,Matches TXN-U-017 exactly
+TXN-U-018,2024-01-23T09:00:00Z,transfer_in,BTC,0.2,USD,,,,exchange_hot,Perspective match TXN-U-018
+TXN-U-019,2024-01-23T11:00:00Z,buy,XRP,2000,USD,0.6,1200,6,exchange_hot,Matches TXN-U-019 exactly
+TXN-U-020,2024-01-24T10:00:00Z,sell,LINK,25,USD,16,400,3,exchange_hot,Matches TXN-U-020 exactly
+EX-ONLY-003,2024-01-26T09:00:00Z,buy,BTC,0.3,USD,45000,13500,12,exchange_hot,No user match
+EX-ONLY-004,2024-01-26T11:00:00Z,sell,ETH,0.8,USD,2800,2240,8,exchange_hot,No user match
