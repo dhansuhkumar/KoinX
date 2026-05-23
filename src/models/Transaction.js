@@ -18,6 +18,7 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       enum: ['user', 'exchange'],
       required: true,
+      index: true,
     },
     /** Original parsed CSV row, stored verbatim for auditability */
     rawRow: {

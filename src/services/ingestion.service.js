@@ -19,6 +19,13 @@ const EXCHANGE_CSV = path.join(
 );
 
 /**
+ * Acceptable percentage difference between quantity × price_per_unit and
+ * total_value before the row is flagged for internal inconsistency.
+ * This is a fixed data-quality rule, not a runtime tolerance.
+ */
+const PRICE_CONSISTENCY_TOLERANCE = 0.01;
+
+/**
  * Parse a single CSV file and return an array of raw row objects.
  * @param {string} filepath
  * @returns {Promise<Object[]>}
@@ -58,27 +65,26 @@ function parseCSV(filepath) {
  * Apply all data quality checks to a parsed row, returning an object
  * ready to be inserted into MongoDB as a Transaction document.
  *
- * Rules (exhaustive — see STEP 12):
+ * Rules (exhaustive):
  *  1. Missing / unparseable / future timestamp
  *  2. Missing / zero / negative / non-numeric quantity
  *  3. Unknown transaction type
  *  4. Missing asset
  *  5. Missing transaction_id
- *  6. price_per_unit inconsistency (quantity × price ≠ total_value by >1%)
- *  7. Duplicate transaction_id within the source (flagged externally)
+ *  6. price_per_unit inconsistency (quantity × price ≠ total_value by > PRICE_CONSISTENCY_TOLERANCE)
+ *  7. Duplicate transaction_id within the source (flagged externally via retroFlagFirstDuplicates)
  *
- * @param {Object}  rawRow      The raw CSV row
+ * @param {Object}  rawRow
  * @param {string}  source      'user' | 'exchange'
  * @param {string}  runId
  * @param {number}  rowIndex    0-based index within the file
- * @param {Set}     seenTxIds   Set of txIds already seen for this source (mutated)
- * @param {Set}     dupTxIds    Set of txIds known to be duplicates (mutated)
+ * @param {Set}     seenTxIds   Mutated: txIds already seen for this source
+ * @param {Set}     dupTxIds    Mutated: txIds confirmed as duplicates
  * @returns {Object}  Transaction document data (not yet saved)
  */
 function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxIds) {
   const issues = [];
 
-  // --- Timestamp ---
   const rawTs = rawRow['timestamp'] || rawRow['date'] || rawRow['time'] || '';
   const timestamp = parseTimestamp(rawTs);
 
@@ -87,13 +93,10 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
   } else {
     const oneDayAhead = new Date(Date.now() + 24 * 60 * 60 * 1000);
     if (timestamp > oneDayAhead) {
-      issues.push(
-        `Future timestamp detected: ${timestamp.toISOString()}`
-      );
+      issues.push(`Future timestamp detected: ${timestamp.toISOString()}`);
     }
   }
 
-  // --- Quantity ---
   const rawQty =
     rawRow['quantity'] ||
     rawRow['amount'] ||
@@ -109,7 +112,6 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
     issues.push(`Quantity is negative: ${quantity}`);
   }
 
-  // --- Type ---
   const rawType =
     rawRow['type'] ||
     rawRow['transaction_type'] ||
@@ -117,12 +119,9 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
     '';
   const type = normalizeType(rawType);
   if (!type) {
-    issues.push(
-      `Unknown transaction type: ${rawType || '(blank)'}`
-    );
+    issues.push(`Unknown transaction type: ${rawType || '(blank)'}`);
   }
 
-  // --- Asset ---
   const rawAsset =
     rawRow['asset'] ||
     rawRow['coin'] ||
@@ -134,7 +133,6 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
     issues.push('Missing asset');
   }
 
-  // --- Transaction ID ---
   const txId =
     (
       rawRow['transaction_id'] ||
@@ -147,7 +145,6 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
   if (!txId) {
     issues.push('Missing transaction_id');
   } else {
-    // Rule 7: duplicate txId within same source
     if (seenTxIds.has(txId)) {
       dupTxIds.add(txId);
       issues.push(`Duplicate transaction_id within source: ${txId}`);
@@ -156,7 +153,6 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
     }
   }
 
-  // --- price_per_unit consistency check (Rule 6) ---
   const pricePerUnit = parseQuantity(
     rawRow['price_per_unit'] ||
       rawRow['price'] ||
@@ -176,11 +172,11 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
     quantity !== null &&
     quantity !== 0
   ) {
-    const implied = quantity * pricePerUnit;
-    const pctDiff = Math.abs(implied - totalValue) / Math.abs(totalValue);
-    if (pctDiff > 0.01) {
+    const impliedTotal = quantity * pricePerUnit;
+    const pctDiff = Math.abs(impliedTotal - totalValue) / Math.abs(totalValue);
+    if (pctDiff > PRICE_CONSISTENCY_TOLERANCE) {
       issues.push(
-        `Data inconsistency: quantity(${quantity}) × price_per_unit(${pricePerUnit}) = ${implied.toFixed(4)} but total_value = ${totalValue} (diff ${(pctDiff * 100).toFixed(2)}%)`
+        `Data inconsistency: quantity(${quantity}) × price_per_unit(${pricePerUnit}) = ${impliedTotal.toFixed(4)} but total_value = ${totalValue} (diff ${(pctDiff * 100).toFixed(2)}%)`
       );
     }
   }
@@ -216,7 +212,8 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
 
 /**
  * Re-scan already-built docs to flag the FIRST occurrence of any txId
- * that was later found to be a duplicate (Rule 7 — all duplicates flagged).
+ * that was later found to be a duplicate — ensuring ALL occurrences are
+ * flagged, not just subsequent ones detected inline.
  *
  * @param {Object[]} docs
  * @param {Set}      dupTxIds
@@ -224,25 +221,23 @@ function buildTransactionDoc(rawRow, source, runId, rowIndex, seenTxIds, dupTxId
 function retroFlagFirstDuplicates(docs, dupTxIds) {
   if (dupTxIds.size === 0) return;
 
-  // Track which dupTxIds we have already retro-flagged
-  const alreadyFlagged = new Set();
+  const retroFlagged = new Set();
 
   for (const doc of docs) {
-    if (doc.txId && dupTxIds.has(doc.txId) && !alreadyFlagged.has(doc.txId)) {
-      // This is the first occurrence — it wasn't flagged during initial pass
+    if (doc.txId && dupTxIds.has(doc.txId) && !retroFlagged.has(doc.txId)) {
       const msg = `Duplicate transaction_id within source: ${doc.txId}`;
       if (!doc.dataQualityIssues.includes(msg)) {
         doc.dataQualityIssues.unshift(msg);
         doc.isFlagged = true;
       }
-      alreadyFlagged.add(doc.txId);
+      retroFlagged.add(doc.txId);
     }
   }
 }
 
 /**
- * Main ingestion function.
- * Reads both CSVs, applies quality checks, bulk-inserts to MongoDB.
+ * Reads both CSVs, applies data quality checks, and bulk-inserts all rows
+ * into MongoDB. No row is dropped; bad rows are flagged.
  *
  * @param {string} runId
  * @returns {Promise<{totalUser: number, totalExchange: number, flaggedUser: number, flaggedExchange: number}>}
@@ -259,7 +254,6 @@ async function ingestCSVs(runId) {
     `[ingest] Parsed ${userRows.length} user rows, ${exchangeRows.length} exchange rows`
   );
 
-  // Build transaction docs with quality checks
   const userSeenIds = new Set();
   const userDupIds = new Set();
   const userDocs = userRows.map((row, i) =>
@@ -267,14 +261,13 @@ async function ingestCSVs(runId) {
   );
   retroFlagFirstDuplicates(userDocs, userDupIds);
 
-  const exSeenIds = new Set();
-  const exDupIds = new Set();
+  const exchangeSeenIds = new Set();
+  const exchangeDupIds = new Set();
   const exchangeDocs = exchangeRows.map((row, i) =>
-    buildTransactionDoc(row, 'exchange', runId, i, exSeenIds, exDupIds)
+    buildTransactionDoc(row, 'exchange', runId, i, exchangeSeenIds, exchangeDupIds)
   );
-  retroFlagFirstDuplicates(exchangeDocs, exDupIds);
+  retroFlagFirstDuplicates(exchangeDocs, exchangeDupIds);
 
-  // Bulk insert
   const allDocs = [...userDocs, ...exchangeDocs];
   await Transaction.insertMany(allDocs, { ordered: false });
 

@@ -17,6 +17,7 @@ const reportEntrySchema = new mongoose.Schema(
       type: String,
       enum: ['matched', 'conflicting', 'unmatched_user', 'unmatched_exchange'],
       required: true,
+      index: true,
     },
     /** Human-readable explanation of why this entry is in its category */
     reason: {

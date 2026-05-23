@@ -5,13 +5,13 @@ const logger = require('../utils/logger');
 const { typesArePerspectiveMatch } = require('../utils/normalizer');
 
 /**
- * Determine if a quantity delta exceeds the configured tolerance.
- * Uses percentage of the larger value to avoid division-by-zero edge cases.
+ * Returns true when the quantity delta is within the configured tolerance.
+ * Uses the larger of the two values as the divisor to avoid division-by-zero.
  *
  * @param {number} userQty
  * @param {number} exchQty
- * @param {number} tolerancePct   e.g. 0.01 means 1 %
- * @returns {boolean} true when the delta is WITHIN tolerance (OK)
+ * @param {number} tolerancePct   e.g. 0.01 means 1%
+ * @returns {boolean}
  */
 function quantityWithinTolerance(userQty, exchQty, tolerancePct) {
   const divisor = Math.max(Math.abs(userQty), Math.abs(exchQty));
@@ -21,12 +21,12 @@ function quantityWithinTolerance(userQty, exchQty, tolerancePct) {
 }
 
 /**
- * Determine if a timestamp delta exceeds the configured tolerance.
+ * Returns true when the timestamp delta is within the configured tolerance.
  *
- * @param {Date} userTs
- * @param {Date} exchTs
+ * @param {Date}   userTs
+ * @param {Date}   exchTs
  * @param {number} toleranceSec
- * @returns {boolean} true when WITHIN tolerance
+ * @returns {boolean}
  */
 function timestampWithinTolerance(userTs, exchTs, toleranceSec) {
   const diffSec = Math.abs(userTs.getTime() - exchTs.getTime()) / 1000;
@@ -34,7 +34,8 @@ function timestampWithinTolerance(userTs, exchTs, toleranceSec) {
 }
 
 /**
- * Build a conflictDetails object describing what field(s) are out of tolerance.
+ * Build a conflictDetails object describing which field(s) are out of tolerance.
+ * Returns null when both fields are within tolerance.
  *
  * @param {Object} userTx
  * @param {Object} exchTx
@@ -99,16 +100,19 @@ function buildConflictDetails(userTx, exchTx, config) {
  * Core matching algorithm.
  *
  * Phase 1 — ID-based matching:
- *   Match on identical txId, then check tolerances. Conflicts are noted but
- *   the pair is still considered "matched" (just with conflictDetails).
+ *   Pairs on identical txId, then checks tolerances. Conflicts are noted but
+ *   the pair is still recorded (just with conflictDetails). Both sides are
+ *   marked used and excluded from Phase 2.
  *
  * Phase 2 — Proximity-based matching:
- *   For remaining transactions match on asset + (type == OR perspective) +
- *   timestamp within tolerance + quantity within tolerance.
- *   On ties, pick the candidate with the smallest timestamp delta.
+ *   For remaining transactions: matches on asset + (exact type OR perspective
+ *   match) + timestamp within tolerance + quantity within tolerance.
+ *   Transactions whose timestamp or quantity is null (flagged rows) are sent
+ *   directly to unmatched_user with a descriptive reason before the loop runs.
+ *   On ties, picks the candidate with the smallest timestamp delta.
  *
  * Phase 3 — Leftovers:
- *   Any unmatched exchange transactions become unmatched_exchange entries.
+ *   Any unconsumed exchange transactions become unmatched_exchange entries.
  *
  * @param {string} runId
  * @param {{ timestampToleranceSeconds: number, quantityTolerancePct: number }} config
@@ -117,7 +121,6 @@ function buildConflictDetails(userTx, exchTx, config) {
 async function runMatching(runId, config) {
   logger.info(`[matching] Starting matching for run ${runId}`);
 
-  // Fetch all transactions for this run
   const userTxs = await Transaction.find({ runId, source: 'user' }).lean();
   const exchTxs = await Transaction.find({ runId, source: 'exchange' }).lean();
 
@@ -129,7 +132,7 @@ async function runMatching(runId, config) {
   const usedExchIds = new Set();
   const results = [];
 
-  // Build index for exchange txs by txId for O(1) Phase 1 lookups
+  // O(1) Phase 1 lookup: exchange txs indexed by txId
   const exchByTxId = new Map();
   for (const etx of exchTxs) {
     if (etx.txId) {
@@ -148,13 +151,12 @@ async function runMatching(runId, config) {
     if (usedUserIds.has(String(userTx._id))) continue;
 
     const candidates = exchByTxId.get(userTx.txId) || [];
-    // Filter to unused exchange candidates
     const available = candidates.filter(
       (e) => !usedExchIds.has(String(e._id))
     );
     if (available.length === 0) continue;
 
-    // Pick the first available (txId should be unique, but handle multiples gracefully)
+    // txId should be unique, but handle multiples gracefully by taking first
     const exchTx = available[0];
 
     const conflictDetails = buildConflictDetails(userTx, exchTx, config);
@@ -191,7 +193,6 @@ async function runMatching(runId, config) {
   );
 
   for (const userTx of remainingUser) {
-    // Must have asset and type to proximity-match
     if (!userTx.asset || !userTx.type) {
       results.push({
         category: 'unmatched_user',
@@ -206,21 +207,35 @@ async function runMatching(runId, config) {
       continue;
     }
 
+    // Flagged rows whose timestamp or quantity is null cannot satisfy the
+    // tolerance filters below. Report them immediately instead of letting them
+    // fall through with a generic "no candidates" reason.
+    if (userTx.timestamp === null || userTx.quantity === null) {
+      results.push({
+        category: 'unmatched_user',
+        reason: 'Could not match: invalid timestamp/quantity',
+        userTxId: String(userTx._id),
+        exchangeTxId: null,
+        userRow: userTx.rawRow,
+        exchangeRow: null,
+        conflictDetails: null,
+      });
+      usedUserIds.add(String(userTx._id));
+      continue;
+    }
+
     const candidates = remainingExch.filter((exchTx) => {
       if (usedExchIds.has(String(exchTx._id))) return false;
       if (!exchTx.asset || !exchTx.type) return false;
-
-      // Asset must match
       if (exchTx.asset !== userTx.asset) return false;
 
-      // Type must match exactly OR be a perspective match
       const typeOk =
         userTx.type === exchTx.type ||
         typesArePerspectiveMatch(userTx.type, exchTx.type);
       if (!typeOk) return false;
 
-      // Both must have valid timestamps within tolerance
-      if (!userTx.timestamp || !exchTx.timestamp) return false;
+      if (!exchTx.timestamp || !exchTx.quantity) return false;
+
       if (
         !timestampWithinTolerance(
           userTx.timestamp,
@@ -231,8 +246,6 @@ async function runMatching(runId, config) {
         return false;
       }
 
-      // Both must have valid quantities within tolerance
-      if (userTx.quantity === null || exchTx.quantity === null) return false;
       if (
         !quantityWithinTolerance(
           userTx.quantity,
@@ -260,7 +273,7 @@ async function runMatching(runId, config) {
       continue;
     }
 
-    // Pick the best candidate (smallest timestamp delta)
+    // Smallest timestamp delta wins on ties
     candidates.sort((a, b) => {
       const deltaA = Math.abs(
         userTx.timestamp.getTime() - a.timestamp.getTime()
@@ -272,9 +285,8 @@ async function runMatching(runId, config) {
     });
 
     const best = candidates[0];
-    // Note: within Phase 2, candidates already pass tolerance checks,
-    // so there should be no conflict. But run buildConflictDetails anyway
-    // to be safe (e.g. floating-point edge cases).
+    // Candidates passed tolerance checks above, but run buildConflictDetails
+    // as a safety net against floating-point edge cases.
     const conflictDetails = buildConflictDetails(userTx, best, config);
     const category = conflictDetails ? 'conflicting' : 'matched';
 

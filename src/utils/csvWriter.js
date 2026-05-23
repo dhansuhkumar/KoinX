@@ -27,8 +27,6 @@ async function writeCsv(filepath, rows) {
   const headers = Object.keys(rows[0]);
 
   return new Promise((resolve, reject) => {
-    const chunks = [];
-
     stringify(rows, { header: true, columns: headers }, (err, output) => {
       if (err) {
         logger.error(`writeCsv: stringify error — ${err.message}`);

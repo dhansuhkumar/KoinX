@@ -398,3 +398,23 @@ Logs are written to `logs/` (git-ignored):
 | `logs/error.log` | Errors only (JSON format) |
 
 Console output is colorized and human-readable.
+
+---
+
+## Version Control Notes
+
+The repository contains 9 commits, each representing one logical unit of work:
+
+| Commit | Message |
+|---|---|
+| `beaa295` | `chore: initialize project, install dependencies` |
+| `168c6d9` | `feat: add mongoose models (Transaction, ReconciliationRun, ReportEntry)` |
+| `348248e` | `feat: add config, logger, and normalizer utilities` |
+| `585abf4` | `feat: implement CSV ingestion service with data quality flagging` |
+| `8d0ef0a` | `feat: implement Phase 1 ID-based matching` |
+| `e0c1e88` | `feat: implement Phase 2 proximity-based matching and conflict detection` |
+| `120c2f8` | `feat: implement report generation service and CSV writer` |
+| `0d94f57` | `feat: add REST API endpoints and controller` |
+| `25d320e` | `docs: add README with setup, API reference, and design decisions` |
+
+All commit messages follow the `type: description` convention (`feat:`, `chore:`, `docs:`). No squashed "initial commit" or "wip" messages. Each commit leaves the codebase in a working, testable state.
