@@ -6,9 +6,19 @@ const {
   getReport,
   getReportSummary,
   getUnmatched,
+  downloadReport,
 } = require('../controllers/reconcile.controller');
 
 const router = Router();
+
+/**
+ * GET /api/health
+ * Liveness probe used by Render (and any uptime monitor) to confirm the
+ * service is running and accepting connections.
+ */
+router.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 /**
  * POST /api/reconcile
@@ -20,7 +30,7 @@ router.post('/reconcile', postReconcile);
 /**
  * GET /api/report/:runId/summary
  * Get status and summary counts for a run.
- * NOTE: Must be registered before /report/:runId to avoid route shadowing.
+ * NOTE: Registered before /report/:runId to avoid route shadowing.
  */
 router.get('/report/:runId/summary', getReportSummary);
 
@@ -31,8 +41,14 @@ router.get('/report/:runId/summary', getReportSummary);
 router.get('/report/:runId/unmatched', getUnmatched);
 
 /**
+ * GET /api/report/:runId/download
+ * Download the reconciliation report as a CSV file attachment.
+ */
+router.get('/report/:runId/download', downloadReport);
+
+/**
  * GET /api/report/:runId
- * Get all report entries for a run.
+ * Get all report entries for a run as JSON.
  */
 router.get('/report/:runId', getReport);
 
