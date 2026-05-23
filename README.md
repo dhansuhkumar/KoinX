@@ -25,7 +25,8 @@ The engine solves a common crypto accounting problem: a user's local transaction
 ### Installation
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/dhansuhkumar/KoinX.git
+cd KoinX
 cd reconciliation-engine
 npm install
 ```
