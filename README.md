@@ -86,6 +86,16 @@ On startup you will see:
 
 ## API Reference
 
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/reconcile` | Start a new reconciliation run (async, returns 202) |
+| `GET` | `/api/report/:runId/summary` | Run status, config, and aggregate counts |
+| `GET` | `/api/report/:runId/unmatched` | All unmatched_user and unmatched_exchange entries |
+| `GET` | `/api/report/:runId/download` | Download the full report as a CSV file attachment |
+| `GET` | `/api/report/:runId` | All report entries as JSON |
+| `GET` | `/api/health` | Liveness probe — returns `{ status: "ok", timestamp }` |
+
+
 ### 1. Start a Reconciliation Run
 
 **`POST /api/reconcile`**
@@ -233,6 +243,42 @@ Returns only `unmatched_user` and `unmatched_exchange` entries.
 
 ---
 
+### 5. Download Report as CSV
+
+**`GET /api/report/:runId/download`**
+
+Returns the reconciliation report as a downloadable CSV file. The CSV is stored in MongoDB — no filesystem access required.
+
+**Response `200 OK`** — `Content-Type: text/csv`, `Content-Disposition: attachment; filename="report-<runId>.csv"`
+
+**Response `404 Not Found`** (run not found or pipeline still running):
+
+```json
+{
+  "error": true,
+  "message": "Report not available"
+}
+```
+
+---
+
+### 6. Health Check
+
+**`GET /api/health`**
+
+Liveness probe used by Render and uptime monitors.
+
+**Response `200 OK`:**
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2024-01-15T10:00:00.000Z"
+}
+```
+
+---
+
 ## Configuration
 
 All tolerances can be set globally via `.env` or overridden per-run via the request body to `POST /api/reconcile`.
@@ -365,7 +411,9 @@ Global tolerances in `.env` act as system-wide defaults. Each `POST /api/reconci
 
 ## Output CSV Report
 
-Each run writes `reports/<runId>.csv` with these columns:
+The CSV report is generated after each run and stored as a string in the `ReconciliationRun` document in MongoDB (field: `reportCsv`). Download it via `GET /api/report/:runId/download`. No filesystem writes occur.
+
+Columns:
 
 | Column | Description |
 |---|---|
@@ -398,6 +446,41 @@ Logs are written to `logs/` (git-ignored):
 | `logs/error.log` | Errors only (JSON format) |
 
 Console output is colorized and human-readable.
+
+---
+
+## Deploying to Render
+
+### Prerequisites
+
+1. Create a free [MongoDB Atlas](https://mongodb.com/atlas) account and spin up a free **M0** cluster.
+2. Under **Database Access**, create a database user with read/write permissions.
+3. Under **Network Access**, add `0.0.0.0/0` to allow connections from any IP.
+4. Go to **Connect → Drivers**, copy the connection string, and replace `<password>` with your user's password.
+
+### Steps
+
+1. Push this repository to a public GitHub repo.
+2. Sign up at [render.com](https://render.com) (free tier is sufficient).
+3. Click **New → Web Service** and connect your GitHub repo.
+4. Render auto-detects `render.yaml` — confirm **Build Command** `npm install` and **Start Command** `npm start`.
+5. Under **Environment Variables**, set `MONGODB_URI` to your Atlas connection string.
+6. Click **Deploy**. The service will be live in 2–3 minutes.
+
+### Testing the live deployment
+
+```bash
+# Start a run
+curl -X POST https://your-app.onrender.com/api/reconcile
+
+# Poll until status is "completed"
+curl https://your-app.onrender.com/api/report/<runId>/summary
+
+# Download the CSV
+curl -o report.csv https://your-app.onrender.com/api/report/<runId>/download
+```
+
+> **Note:** Render free-tier services spin down after 15 minutes of inactivity. The first request after idle may take ~30 seconds to cold-start.
 
 ---
 
