@@ -18,16 +18,12 @@ const logger = require('../utils/logger');
  */
 async function _runPipeline(runId, runConfig) {
   try {
-    // Ingestion
     const ingestionStats = await ingestCSVs(runId);
-
-    // Matching
     const matchResults = await runMatching(runId, runConfig);
 
-    // Report generation
-    const { summary, csvPath } = await generateReport(runId, matchResults);
+    // generateReport saves ReportEntries and stores reportCsv on the run doc
+    const { summary } = await generateReport(runId, matchResults);
 
-    // Update run with final state
     await ReconciliationRun.findOneAndUpdate(
       { runId },
       {
@@ -39,7 +35,6 @@ async function _runPipeline(runId, runConfig) {
           flaggedUser: ingestionStats.flaggedUser,
           flaggedExchange: ingestionStats.flaggedExchange,
         },
-        reportCsvPath: csvPath,
         completedAt: new Date(),
       }
     );
@@ -78,7 +73,6 @@ async function postReconcile(req, res) {
           : config.quantityTolerancePct,
     };
 
-    // Validate config values
     if (
       isNaN(runConfig.timestampToleranceSeconds) ||
       runConfig.timestampToleranceSeconds < 0
@@ -102,7 +96,6 @@ async function postReconcile(req, res) {
 
     const runId = uuidv4();
 
-    // Create the run record
     await ReconciliationRun.create({
       runId,
       status: 'running',
@@ -110,9 +103,8 @@ async function postReconcile(req, res) {
       startedAt: new Date(),
     });
 
-    // Fire-and-forget pipeline
+    // Safety net — errors are also handled inside _runPipeline
     _runPipeline(runId, runConfig).catch((err) => {
-      // Safety net — errors are also handled inside _runPipeline
       logger.error(`[controller] Unhandled pipeline error for run ${runId}: ${err.message}`);
     });
 
@@ -169,12 +161,14 @@ async function getReport(req, res) {
 /**
  * GET /api/report/:runId/summary
  * Returns the ReconciliationRun document (runId, status, summary, config, timestamps).
+ * Does not include reportCsv — use the /download endpoint for that.
  */
 async function getReportSummary(req, res) {
   try {
     const { runId } = req.params;
 
-    const run = await ReconciliationRun.findOne({ runId }).lean();
+    // Exclude the large reportCsv field from this response
+    const run = await ReconciliationRun.findOne({ runId }, { reportCsv: 0 }).lean();
     if (!run) {
       return res.status(404).json({
         error: true,
@@ -188,7 +182,6 @@ async function getReportSummary(req, res) {
       status: run.status,
       summary: run.summary,
       config: run.config,
-      reportCsvPath: run.reportCsvPath,
       errorMessage: run.errorMessage || null,
       startedAt: run.startedAt,
       completedAt: run.completedAt,
@@ -212,7 +205,7 @@ async function getUnmatched(req, res) {
   try {
     const { runId } = req.params;
 
-    const run = await ReconciliationRun.findOne({ runId }).lean();
+    const run = await ReconciliationRun.findOne({ runId }, { runId: 1, status: 1 }).lean();
     if (!run) {
       return res.status(404).json({
         error: true,
@@ -248,9 +241,40 @@ async function getUnmatched(req, res) {
   }
 }
 
+/**
+ * GET /api/report/:runId/download
+ * Streams the stored CSV report as a downloadable file attachment.
+ */
+async function downloadReport(req, res) {
+  try {
+    const { runId } = req.params;
+
+    const run = await ReconciliationRun.findOne({ runId }, { reportCsv: 1, status: 1 }).lean();
+    if (!run || !run.reportCsv) {
+      return res.status(404).json({
+        error: true,
+        message: 'Report not available',
+        code: 'REPORT_NOT_AVAILABLE',
+      });
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="report-${runId}.csv"`);
+    return res.status(200).send(run.reportCsv);
+  } catch (err) {
+    logger.error(`[downloadReport] ${err.message}`, { stack: err.stack });
+    return res.status(500).json({
+      error: true,
+      message: 'Failed to download report',
+      code: 'INTERNAL_ERROR',
+    });
+  }
+}
+
 module.exports = {
   postReconcile,
   getReport,
   getReportSummary,
   getUnmatched,
+  downloadReport,
 };

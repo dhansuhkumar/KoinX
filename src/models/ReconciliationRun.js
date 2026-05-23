@@ -33,8 +33,8 @@ const reconciliationRunSchema = new mongoose.Schema(
       flaggedUser: { type: Number, default: 0 },
       flaggedExchange: { type: Number, default: 0 },
     },
-    /** Absolute filesystem path to the generated CSV report */
-    reportCsvPath: {
+    /** Full CSV report content stored in MongoDB (no filesystem required) */
+    reportCsv: {
       type: String,
       default: null,
     },

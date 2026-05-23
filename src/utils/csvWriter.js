@@ -1,47 +1,32 @@
 'use strict';
 
-const path = require('path');
-const fs = require('fs');
 const { stringify } = require('csv-stringify');
 const logger = require('./logger');
 
 /**
- * Writes an array of plain objects to a CSV file.
- * Derives headers from the keys of the first row.
- * Creates parent directories if they do not exist.
+ * Serializes an array of plain objects to a CSV string.
+ * Headers are derived from the keys of the first row.
  *
- * @param {string} filepath  Absolute or relative path for the output CSV
- * @param {Object[]} rows    Array of plain objects to serialize
- * @returns {Promise<void>}
+ * @param {Object[]} rows
+ * @returns {Promise<string>} CSV-formatted string
  */
-async function writeCsv(filepath, rows) {
+async function csvToString(rows) {
   if (!rows || rows.length === 0) {
-    logger.warn(`writeCsv: no rows to write, creating empty file at ${filepath}`);
-    fs.mkdirSync(path.dirname(filepath), { recursive: true });
-    fs.writeFileSync(filepath, '');
-    return;
+    logger.warn('csvToString: called with empty rows array — returning empty string');
+    return '';
   }
-
-  fs.mkdirSync(path.dirname(filepath), { recursive: true });
 
   const headers = Object.keys(rows[0]);
 
   return new Promise((resolve, reject) => {
     stringify(rows, { header: true, columns: headers }, (err, output) => {
       if (err) {
-        logger.error(`writeCsv: stringify error — ${err.message}`);
+        logger.error(`csvToString: stringify error — ${err.message}`);
         return reject(err);
       }
-      try {
-        fs.writeFileSync(filepath, output, 'utf8');
-        logger.info(`writeCsv: wrote ${rows.length} rows to ${filepath}`);
-        resolve();
-      } catch (writeErr) {
-        logger.error(`writeCsv: file write error — ${writeErr.message}`);
-        reject(writeErr);
-      }
+      resolve(output);
     });
   });
 }
 
-module.exports = { writeCsv };
+module.exports = { csvToString };

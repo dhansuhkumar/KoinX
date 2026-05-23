@@ -1,20 +1,18 @@
 'use strict';
 
-const path = require('path');
-const fs = require('fs');
 const ReportEntry = require('../models/ReportEntry');
-const { writeCsv } = require('../utils/csvWriter');
+const ReconciliationRun = require('../models/ReconciliationRun');
+const { csvToString } = require('../utils/csvWriter');
 const logger = require('../utils/logger');
-
-const REPORTS_DIR = path.join(__dirname, '../../reports');
 
 /**
  * Persists all match results to MongoDB, computes summary counts, and
- * writes a flat CSV report to disk.
+ * stores the CSV report as a string on the ReconciliationRun document.
+ * No filesystem writes — compatible with ephemeral hosts like Render.
  *
  * @param {string}   runId
  * @param {Object[]} matchResults  Array returned by runMatching()
- * @returns {Promise<Object>} { summary, csvPath }
+ * @returns {Promise<Object>} { summary }
  */
 async function generateReport(runId, matchResults) {
   logger.info(
@@ -78,13 +76,16 @@ async function generateReport(runId, matchResults) {
     };
   });
 
-  fs.mkdirSync(REPORTS_DIR, { recursive: true });
-  const csvPath = path.join(REPORTS_DIR, `${runId}.csv`);
-  await writeCsv(csvPath, csvRows);
+  const csvContent = await csvToString(csvRows);
 
-  logger.info(`[report] CSV written to ${csvPath}`);
+  await ReconciliationRun.findOneAndUpdate(
+    { runId },
+    { reportCsv: csvContent }
+  );
 
-  return { summary, csvPath };
+  logger.info(`[report] CSV content stored in MongoDB for run ${runId}`);
+
+  return { summary };
 }
 
 module.exports = { generateReport };
