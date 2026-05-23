@@ -486,7 +486,7 @@ curl -o report.csv https://your-app.onrender.com/api/report/<runId>/download
 
 ## Version Control Notes
 
-The repository contains 9 commits, each representing one logical unit of work:
+The repository contains 14 commits, each representing one logical unit of work:
 
 | Commit | Message |
 |---|---|
@@ -499,5 +499,10 @@ The repository contains 9 commits, each representing one logical unit of work:
 | `120c2f8` | `feat: implement report generation service and CSV writer` |
 | `0d94f57` | `feat: add REST API endpoints and controller` |
 | `25d320e` | `docs: add README with setup, API reference, and design decisions` |
+| `13e8380` | `fix: production-readiness audit — indexes, dead code, magic numbers, flagged-row reason` |
+| `29724c9` | `feat: store report CSV in MongoDB instead of filesystem for Render compatibility` |
+| `f9868b6` | `feat: add GET /report/:runId/download and GET /health endpoints` |
+| `1dc5581` | `chore: add render.yaml for one-click Render deployment` |
+| `bd35ad7` | `docs: add Render deployment instructions to README` |
 
-All commit messages follow the `type: description` convention (`feat:`, `chore:`, `docs:`). No squashed "initial commit" or "wip" messages. Each commit leaves the codebase in a working, testable state.
+All commit messages follow the `type: description` convention (`feat:`, `chore:`, `fix:`, `docs:`). No squashed "initial commit" or "wip" messages. Each commit leaves the codebase in a working, testable state.
