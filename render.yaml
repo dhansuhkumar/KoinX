@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: koinx-reconciliation-engine
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: TIMESTAMP_TOLERANCE_SECONDS
+        value: 300
+      - key: QUANTITY_TOLERANCE_PCT
+        value: 0.01
